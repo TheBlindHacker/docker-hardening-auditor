@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env*
+*.pem
+*.key
+*.log
+Dockerfile*
+docker-compose*
+__pycache__
+*.pyc
+node_modules
+dist/
+build/
+coverage/
+.pytest_cache/

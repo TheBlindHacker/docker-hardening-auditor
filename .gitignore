@@ -1,0 +1,21 @@
+# Secrets and environment configurations
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.crt
+id_rsa*
+id_ed25519*
+secrets/
+
+# Build artifacts
+dist/
+build/
+*.zip
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage

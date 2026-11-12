@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1.4
+# ==============================================================================
+# Hardened Multi-Stage Dockerfile (CIS Docker Benchmark Compliant)
+# Author: Joe B. (The Blind Hacker)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Stage 1: Build Environment
+# ------------------------------------------------------------------------------
+FROM python:3.11-slim@sha256:7f0c1a4b95f2694b8e8f8564f9bf51737e1b9b91c13d7ff43a5796a5dd608bfa AS builder
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+# Install build dependencies in temporary builder stage (discarded before runtime stage)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    && apt-get clean
+
+COPY requirements.txt .
+RUN pip install --user --no-warn-script-location -r requirements.txt
+
+# ------------------------------------------------------------------------------
+# Stage 2: Hardened Runtime Environment
+# ------------------------------------------------------------------------------
+FROM python:3.11-slim@sha256:7f0c1a4b95f2694b8e8f8564f9bf51737e1b9b91c13d7ff43a5796a5dd608bfa AS runner
+
+# Create non-root system user and group with explicit numeric UID/GID
+RUN groupadd -g 10001 appgroup && \
+    useradd -u 10001 -g appgroup -s /usr/sbin/nologin -M -d /nonexistent appuser
+
+WORKDIR /app
+
+# Copy only installed python packages from builder stage
+COPY --from=builder --chown=10001:10001 /root/.local /home/appuser/.local
+COPY --chown=10001:10001 src/ /app/src/
+
+# Environment setup
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Remove unnecessary system package managers and setuid/setgid binaries
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
+
+# Enforce Non-Root Execution
+USER 10001:10001
+
+# Liveness Healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD python -c "import socket; s = socket.socket(); s.connect(('127.0.0.1', 8080)); s.close()" || exit 1
+
+EXPOSE 8080
+
+ENTRYPOINT ["python", "-m", "src.main"]

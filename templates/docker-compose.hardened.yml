@@ -1,0 +1,84 @@
+# ==============================================================================
+# Hardened Docker Compose Configuration (CIS Docker Benchmark & 2026 Standards)
+# Author: Joe B. (The Blind Hacker)
+# ==============================================================================
+name: hardened-production-stack
+
+services:
+  api-service:
+    build:
+      context: .
+      dockerfile: templates/Dockerfile.hardened
+    image: company/hardened-api:2.0.0@sha256:7f0c1a4b95f2694b8e8f8564f9bf51737e1b9b91c13d7ff43a5796a5dd608bfa
+    container_name: hardened-api-prod
+
+    # 1. Non-Root Execution (Explicit Numeric UID:GID)
+    user: "10001:10001"
+
+    # 2. Cgroups v2 & PID Namespace Isolation (Blocks release_agent & fork-bomb DoS)
+    cgroup: private
+    pids_limit: 256
+
+    # 3. Immutable Filesystem Protection (Blocks runtime binary dropping)
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /run:rw,noexec,nosuid,nodev,size=16m
+
+    # 4. Kernel Privilege Isolation, Seccomp 2026 Profile & Capability Dropping
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:templates/seccomp-2026-hardened.json
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE # Only required if binding to ports < 1024
+
+    # 5. Strict Resource Allocation (OOM & CPU Starvation Defense)
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+    # 6. Network Interface Hardening (Loopback Binding Only)
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    # 7. Runtime Secret Mounting (Zero ENV Secret Leaks)
+    secrets:
+      - app_api_credentials
+
+    # 8. Logging Hygiene (Prevent Host Disk Exhaustion)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+    # 9. Liveness & Restart Policy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.socket(); s.connect(('127.0.0.1', 8080)); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # 10. Isolated Internal Bridge Network
+    networks:
+      - internal-app-net
+
+secrets:
+  app_api_credentials:
+    file: ./secrets/app_api_credentials.txt
+
+networks:
+  internal-app-net:
+    driver: bridge
+    internal: false
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
